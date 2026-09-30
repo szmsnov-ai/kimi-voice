@@ -1,0 +1,107 @@
+<!DOCTYPE html>
+<html lang="ru">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<meta name="apple-mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+<meta name="theme-color" content="#0e0e10">
+<title>Kimi Голос</title>
+<link rel="apple-touch-icon" href="icon.png">
+<link rel="icon" href="icon.png">
+<style>
+*{box-sizing:border-box;margin:0;padding:0;-webkit-tap-highlight-color:transparent}
+body{background:#0e0e10;color:#f2f2f4;font-family:-apple-system,'Segoe UI',Roboto,sans-serif;min-height:100vh;display:flex;flex-direction:column;max-width:520px;margin:0 auto;padding:16px env(safe-area-inset-right) calc(20px + env(safe-area-inset-bottom)) env(safe-area-inset-left)}
+header{display:flex;justify-content:space-between;align-items:center;padding:8px 4px 16px}
+h1{font-size:20px;font-weight:700}
+#gear{background:none;border:none;font-size:22px;color:#9a9aa2}
+.models{display:flex;gap:8px;margin-bottom:16px}
+.models button{flex:1;padding:12px 4px;border-radius:12px;border:1px solid #2c2c33;background:#17171b;color:#c9c9d1;font-size:15px;font-weight:600}
+.models button.active{background:#2e3f8f;border-color:#5c7aff;color:#fff}
+#mic{width:92px;height:92px;border-radius:50%;border:none;background:#5c7aff;font-size:38px;margin:4px auto 16px;display:block;box-shadow:0 6px 24px rgba(92,122,255,.35)}
+#mic.on{background:#e0245e;animation:pulse 1.1s infinite}
+@keyframes pulse{0%{box-shadow:0 0 0 0 rgba(224,36,94,.5)}70%{box-shadow:0 0 0 18px rgba(224,36,94,0)}100%{box-shadow:0 0 0 0 rgba(224,36,94,0)}}
+textarea{width:100%;min-height:86px;border-radius:14px;border:1px solid #2c2c33;background:#17171b;color:#f2f2f4;padding:12px;font-size:16px;resize:vertical}
+#send{width:100%;margin-top:12px;padding:15px;border:none;border-radius:14px;background:#5c7aff;color:#fff;font-size:17px;font-weight:700}
+#send:disabled{background:#2c2c33;color:#777}
+#answer{margin-top:16px;background:#17171b;border:1px solid #2c2c33;border-radius:14px;padding:14px;font-size:16px;line-height:1.55;white-space:pre-wrap;display:none}
+#hint{margin-top:10px;color:#777;font-size:13px;text-align:center}
+#settings{position:fixed;inset:0;background:rgba(0,0,0,.7);display:none;align-items:center;justify-content:center;padding:24px;z-index:10}
+#settings .box{background:#1c1c22;border-radius:16px;padding:20px;width:100%;max-width:400px}
+#settings label{font-size:14px;color:#9a9aa2;display:block;margin-bottom:6px}
+#keyInput{width:100%;padding:12px;border-radius:10px;border:1px solid #2c2c33;background:#0e0e10;color:#f2f2f4;font-size:15px;margin-bottom:14px}
+#saveKey{width:100%;padding:13px;border:none;border-radius:12px;background:#5c7aff;color:#fff;font-size:16px;font-weight:700}
+</style>
+</head>
+<body>
+<header><h1>🎙 Kimi Голос</h1><button id="gear">⚙️</button></header>
+<div class="models" id="models"></div>
+<button id="mic">🎤</button>
+<textarea id="text" placeholder="Нажми микрофон и говори по-русски…"></textarea>
+<button id="send">Отправить →</button>
+<div id="answer"></div>
+<div id="hint"></div>
+
+<div id="settings"><div class="box">
+<label>API-ключ Kimi (platform.kimi.ai → API Keys)</label>
+<input id="keyInput" type="password" placeholder="sk-...">
+<button id="saveKey">Сохранить</button>
+<p style="margin-top:12px;font-size:12px;color:#777">Ключ хранится только на этом устройстве (localStorage) и отправляется напрямую в Kimi API.</p>
+</div></div>
+
+<script>
+const MODELS=[['kimi-k3','K3'],['kimi-k2-turbo-preview','K2 Turbo'],['kimi-k2-0905-preview','K2']];
+let model=localStorage.getItem('kimi_model')||'kimi-k3';
+let key=localStorage.getItem('kimi_key')||'sk-77PfF9BXnz55Xtzl77axB5LqepVaZg8XzKe9igrlJEnWrqBO';
+const $=id=>document.getElementById(id);
+const modelsEl=$('models');
+MODELS.forEach(([id,label])=>{const b=document.createElement('button');b.textContent=label;b.dataset.id=id;if(id===model)b.classList.add('active');b.onclick=()=>{model=id;localStorage.setItem('kimi_model',id);[...modelsEl.children].forEach(x=>x.classList.remove('active'));b.classList.add('active');};modelsEl.appendChild(b);});
+
+$('gear').onclick=()=>{$('keyInput').value=key;$('settings').style.display='flex';};
+$('saveKey').onclick=()=>{key=$('keyInput').value.trim();localStorage.setItem('kimi_key',key);$('settings').style.display='none';};
+$('settings').onclick=e=>{if(e.target.id==='settings')$('settings').style.display='none';};
+
+// ---- Speech recognition (Apple engine, ru-RU) ----
+const SR=window.SpeechRecognition||window.webkitSpeechRecognition;
+let rec=null,listening=false;
+if(!SR)$('hint').textContent='⚠️ Распознавание речи недоступно. Откройте приложение через Safari (не внутри другого приложения).';
+$('mic').onclick=()=>{
+  if(!SR)return;
+  if(!rec){
+    rec=new SR();rec.lang='ru-RU';rec.interimResults=true;rec.continuous=false;
+    rec.onresult=e=>{let s='';for(const r of e.results)s+=r[0].text;$('text').value=s;};
+    rec.onend=()=>{listening=false;$('mic').classList.remove('on');};
+    rec.onerror=e=>{listening=false;$('mic').classList.remove('on');$('hint').textContent='Ошибка распознавания: '+e.error;};
+  }
+  if(listening){rec.stop();return;}
+  $('text').value='';$('answer').style.display='none';$('hint').textContent='';
+  rec.start();listening=true;$('mic').classList.add('on');
+};
+
+// ---- Send to Kimi API ----
+$('send').onclick=async()=>{
+  const q=$('text').value.trim();
+  if(!q)return;
+  if(!key){$('settings').style.display='flex';$('hint').textContent='Сначала введите API-ключ ⚙️';return;}
+  const btn=$('send');btn.disabled=true;btn.textContent='Думаю…';
+  const a=$('answer');a.style.display='block';a.textContent='⏳ '+MODELS.find(m=>m[0]===model)[1]+' думает…';
+  try{
+    const r=await fetch('https://api.moonshot.ai/v1/chat/completions',{method:'POST',
+      headers:{'Content-Type':'application/json','Authorization':'Bearer '+key},
+      body:JSON.stringify({model:model,messages:[{role:'user',content:q}],max_completion_tokens:4000})});
+    if(r.status===401){a.textContent='❌ 401: ключ не подошёл. Проверьте: ключ с platform.kimi.ai (не .com), есть баланс.';}
+    else if(!r.ok){const e=await r.json().catch(()=>({}));a.textContent='❌ Ошибка '+r.status+': '+((e.error&&e.error.message)||r.statusText);}
+    else{
+      const j=await r.json();const m=j.choices[0].message;
+      let out=m.content||'(пустой ответ)';
+      if(m.reasoning_content)out='🧠 Рассуждение K3 (можно пролистать):\n'+m.reasoning_content+'\n\n———\n\n'+out;
+      a.textContent=out;
+    }
+  }catch(err){
+    a.textContent='❌ Сетевой сбой ('+err.message+'). Возможны: нет интернета, блокировка CORS из браузера или нестабильный доступ из вашего региона.';
+  }
+  btn.disabled=false;btn.textContent='Отправить →';
+};
+</script>
+</body>
+</html>
